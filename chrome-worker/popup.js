@@ -18,6 +18,20 @@ function render(s) {
   setRow("tiktok", s.tiktokStatus === "READY", "Ready", "Not Open");
   document.getElementById("lastjob").textContent = s.lastJobId ? s.lastJobId.slice(0, 8) + "…" : "—";
   document.getElementById("lastaction").textContent = s.lastAction || "Idle";
+  // Display the runtime build identifier so the user can verify which build is
+  // actually loaded in Chrome. If this shows "0.5.3-build1", the latest files
+  // are loaded. If it shows "0.5.2" or is missing, the local folder has stale
+  // files and must be updated from GitHub before reloading.
+  const buildEl = document.getElementById("build");
+  if (buildEl) {
+    if (s.flowWorkerBuild) {
+      buildEl.innerHTML = `<span class="dot green"></span>${s.flowWorkerBuild}`;
+      buildEl.className = "val ok";
+    } else {
+      buildEl.innerHTML = `<span class="dot amber"></span>missing (stale 0.5.2)`;
+      buildEl.className = "val muted";
+    }
+  }
 }
 
 async function refresh() {
