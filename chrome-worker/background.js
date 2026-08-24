@@ -623,11 +623,11 @@ async function runGoogleFlow(job, runner) {
       // Find the next real visible CTA (excluding ones already clicked).
       const cta = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "findLandingCta", excludeTexts: clickedTexts }, 10000);
       if (!cta || !cta.ok || !cta.text) {
-        persistFlowDebug({ stage: "NO_LANDING_CTA", failureStage: "NO_LANDING_CTA", ctaFound: false, attempt, candidateCount: cta && cta.candidateCount || 0, candidates: cta && cta.candidates || [], snapshot: lastSnapshot, clickedTexts, diagSteps: logDiag({ step: "NO_LANDING_CTA", attempt, candidateCount: cta && cta.candidateCount || 0 }) });
-        flowFail(runner, "NO_LANDING_CTA", { attempt, clickedTexts, snapshot: lastSnapshot, candidateCount: cta && cta.candidateCount || 0, candidates: cta && cta.candidates || [] });
+        persistFlowDebug({ stage: "NO_LANDING_CTA", failureStage: "NO_LANDING_CTA", ctaFound: false, attempt, landingButtonCandidates: cta && cta.landingButtonCandidates, matchedNewProject: cta && cta.matchedNewProject, matchedIndex: cta && cta.matchedIndex, snapshot: lastSnapshot, clickedTexts, diagSteps: logDiag({ step: "NO_LANDING_CTA", attempt, matchedNewProject: cta && cta.matchedNewProject, matchedIndex: cta && cta.matchedIndex }) });
+        flowFail(runner, "NO_LANDING_CTA", { attempt, clickedTexts, snapshot: lastSnapshot, landingButtonCandidates: cta && cta.landingButtonCandidates });
         return;
       }
-      persistFlowDebug({ stage: "NEW_PROJECT_CTA_FOUND", ctaFound: true, attempt, ctaText: cta.text, ctaRawText: cta.rawText, ctaTag: cta.tag, ctaSource: cta.source, ctaOuterHTML: cta.outerHTML, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text, ctaRawText: cta.rawText, ctaTag: cta.tag, ctaSource: cta.source }) });
+      persistFlowDebug({ stage: "NEW_PROJECT_CTA_FOUND", ctaFound: true, attempt, ctaText: cta.text, ctaRawText: cta.rawText, ctaTag: cta.tag, ctaSource: cta.source, ctaOuterHTML: cta.outerHTML, landingButtonCandidates: cta.landingButtonCandidates, matchedNewProject: cta.matchedNewProject, matchedOuterHTML: cta.matchedOuterHTML, matchedIndex: cta.matchedIndex, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text, ctaRawText: cta.rawText, ctaTag: cta.tag, ctaSource: cta.source, matchedNewProject: cta.matchedNewProject, matchedIndex: cta.matchedIndex }) });
       const urlBefore = cta.url;
       const clicked = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "clickLandingCta", text: cta.text }, 10000);
       if (!clicked || !clicked.ok) {
