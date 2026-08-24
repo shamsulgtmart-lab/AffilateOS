@@ -508,6 +508,27 @@ function sendToFlow(flowTabId, payload, timeoutMs) {
   });
 }
 
+// Wait for a visible prompt input to appear in the Flow tab after a landing
+// CTA click. Re-injects the content script each poll (idempotent) so it works
+// across full-page navigations too. Resolves { ok, url, candidates, foundText }.
+async function waitForVisiblePrompt(flowTabId, runner, maxMs) {
+  const start = Date.now();
+  let last = null;
+  while (Date.now() - start < maxMs) {
+    if (runner.cancelled) return { ok: false, reason: "CANCELLED", last };
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: flowTabId }, files: ["google_flow.js"] });
+    } catch {}
+    const res = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "getPromptCandidates" }, 8000);
+    last = res;
+    if (res && res.ok && res.hasVisiblePrompt) {
+      return { ok: true, url: res.url, candidates: res.candidates, foundText: res.foundText };
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return { ok: false, reason: "WORKSPACE_LOAD_TIMEOUT", last };
+}
+
 // Validate the Google Flow tab is REALLY on Google Flow (not a 404, login, or
 // other page) before ever claiming FLOW_READY. Checks: tab exists, current URL
 // is a valid Flow URL, content script can respond, page is not a 404/login.
@@ -573,24 +594,92 @@ async function runGoogleFlow(job, runner) {
 
   // Persist the initial page snapshot immediately so a diagnostic is ALWAYS
   // available — even if the run fails before verification (e.g. NO_PROMPT_INPUT).
-  persistFlowDebug({ stage: "INSPECT", snapshot: inspect.snapshot });
+  const diagSteps = [];
+  const logDiag = (entry) => { diagSteps.push(Object.assign({ t: new Date().toISOString() }, entry)); return diagSteps; };
+  persistFlowDebug({ stage: "INSPECT", snapshot: inspect.snapshot, diagSteps: logDiag({ step: "INSPECT" }) });
+
+  // 1b. Determine whether the real prompt input is already visible. If not, we
+  // are on the Flow landing page and must enter the workspace via the real UI
+  // (e.g. "Get started") before attempting enterPrompt. No CSS selectors are
+  // guessed — only real visible buttons are clicked, and the DOM is re-inspected
+  // after each action to decide the next step.
+  const pc = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "getPromptCandidates" }, 10000);
+  let promptReady = !!(pc && pc.ok && pc.hasVisiblePrompt);
+  let lastSnapshot = inspect.snapshot;
+  let lastCandidates = (pc && pc.candidates) || null;
+  const clickedTexts = [];
+  let lastUrlAfter = null;
+
+  if (!promptReady) {
+    // Landing page detected — no visible prompt input.
+    persistFlowDebug({ stage: "LANDING_PAGE_DETECTED", snapshot: lastSnapshot, promptCandidates: lastCandidates, diagSteps: logDiag({ step: "LANDING_PAGE_DETECTED", hasVisiblePrompt: false }) });
+    setStatus({ phase: "FLOW_ENTERING_WORKSPACE", lastAction: "Entering Google Flow workspace" });
+
+    const MAX_LANDING_ATTEMPTS = 3;
+    let attempt = 0;
+    while (!promptReady && attempt < MAX_LANDING_ATTEMPTS && !runner.cancelled) {
+      attempt++;
+      // Find the next real visible CTA (excluding ones already clicked).
+      const cta = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "findLandingCta", excludeTexts: clickedTexts }, 10000);
+      if (!cta || !cta.ok || !cta.text) {
+        persistFlowDebug({ stage: "NO_LANDING_CTA", failureStage: "NO_LANDING_CTA", attempt, snapshot: lastSnapshot, clickedTexts, diagSteps: logDiag({ step: "NO_LANDING_CTA", attempt }) });
+        flowFail(runner, "NO_LANDING_CTA", { attempt, clickedTexts, snapshot: lastSnapshot });
+        return;
+      }
+      const urlBefore = cta.url;
+      const clicked = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "clickLandingCta", text: cta.text }, 10000);
+      if (!clicked || !clicked.ok) {
+        persistFlowDebug({ stage: "LANDING_CTA_CLICK_FAILED", failureStage: "LANDING_CTA_CLICK_FAILED", attempt, ctaText: cta.text, snapshot: lastSnapshot, diagSteps: logDiag({ step: "LANDING_CTA_CLICK_FAILED", attempt, ctaText: cta.text }) });
+        flowFail(runner, "LANDING_CTA_CLICK_FAILED", { ctaText: cta.text, attempt });
+        return;
+      }
+      clickedTexts.push(cta.text);
+      persistFlowDebug({ stage: "LANDING_CTA_CLICKED", attempt, clickedText: cta.text, urlBefore, snapshot: lastSnapshot, diagSteps: logDiag({ step: "LANDING_CTA_CLICKED", attempt, clickedText: cta.text, urlBefore }) });
+
+      // Wait for the workspace/editor to load a visible prompt input.
+      const ws = await waitForVisiblePrompt(flowTabId, runner, 30000);
+      if (runner.cancelled) return;
+      lastUrlAfter = (ws && ws.url) || null;
+      if (ws && ws.ok) {
+        // Re-inspect the workspace DOM.
+        const reInspect = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "inspect" }, 15000);
+        lastSnapshot = (reInspect && reInspect.snapshot) || lastSnapshot;
+        lastCandidates = ws.candidates || lastCandidates;
+        promptReady = true;
+        persistFlowDebug({ stage: "WORKSPACE_LOADED", attempt, urlAfter: lastUrlAfter, clickedText: cta.text, snapshot: lastSnapshot, promptCandidates: lastCandidates, diagSteps: logDiag({ step: "WORKSPACE_LOADED", attempt, urlAfter: lastUrlAfter, clickedText: cta.text, foundText: ws.foundText }) });
+      } else {
+        // Workspace did not expose a visible prompt — re-inspect to find the
+        // next real UI action from the DOM (do not guess selectors).
+        const reInspect = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "inspect" }, 15000);
+        lastSnapshot = (reInspect && reInspect.snapshot) || lastSnapshot;
+        lastCandidates = (ws && ws.last && ws.last.candidates) || lastCandidates;
+        persistFlowDebug({ stage: "WORKSPACE_NOT_LOADED", attempt, urlAfter: lastUrlAfter, snapshot: lastSnapshot, promptCandidates: lastCandidates, waitResult: ws && ws.reason, diagSteps: logDiag({ step: "WORKSPACE_NOT_LOADED", attempt, urlAfter: lastUrlAfter }) });
+      }
+    }
+
+    if (!promptReady) {
+      persistFlowDebug({ stage: "NO_PROMPT_INPUT_AFTER_LANDING_CTA", failureStage: "NO_PROMPT_INPUT_AFTER_LANDING_CTA", attempts: attempt, snapshot: lastSnapshot, promptCandidates: lastCandidates, clickedTexts, lastUrlAfter, diagSteps });
+      flowFail(runner, "NO_PROMPT_INPUT_AFTER_LANDING_CTA", { attempts: attempt, snapshot: lastSnapshot, clickedTexts });
+      return;
+    }
+  }
 
   setStatus({ phase: "FLOW_PROJECT_READY", lastAction: "Google Flow project ready" });
 
   // 2. Enter the prompt.
   const prompt = buildPrompt(job);
   if (!prompt) {
-    persistFlowDebug({ stage: "NO_PROMPT", failureStage: "NO_PROMPT", snapshot: inspect.snapshot });
+    persistFlowDebug({ stage: "NO_PROMPT", failureStage: "NO_PROMPT", snapshot: lastSnapshot, diagSteps });
     flowFail(runner, "NO_PROMPT");
     return;
   }
   const entered = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "enterPrompt", prompt });
   if (!entered || !entered.ok) {
     const reason = (entered && entered.state) || "NO_PROMPT_INPUT";
-    const snap = (entered && entered.snapshot) || inspect.snapshot;
+    const snap = (entered && entered.snapshot) || lastSnapshot;
     // Persist the failure snapshot to BOTH flowDebug and flowDetail (flowFail
     // writes flowDetail) so the Admin viewer shows evidence at NO_PROMPT_INPUT.
-    persistFlowDebug({ stage: reason, failureStage: reason, snapshot: snap });
+    persistFlowDebug({ stage: reason, failureStage: reason, snapshot: snap, diagSteps });
     flowFail(runner, reason, snap);
     return;
   }
