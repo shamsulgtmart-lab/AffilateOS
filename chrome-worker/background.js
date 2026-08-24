@@ -627,6 +627,7 @@ async function runGoogleFlow(job, runner) {
         flowFail(runner, "NO_LANDING_CTA", { attempt, clickedTexts, snapshot: lastSnapshot });
         return;
       }
+      persistFlowDebug({ stage: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text }) });
       const urlBefore = cta.url;
       const clicked = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "clickLandingCta", text: cta.text }, 10000);
       if (!clicked || !clicked.ok) {
@@ -635,7 +636,7 @@ async function runGoogleFlow(job, runner) {
         return;
       }
       clickedTexts.push(cta.text);
-      persistFlowDebug({ stage: "LANDING_CTA_CLICKED", attempt, clickedText: cta.text, urlBefore, snapshot: lastSnapshot, diagSteps: logDiag({ step: "LANDING_CTA_CLICKED", attempt, clickedText: cta.text, urlBefore }) });
+      persistFlowDebug({ stage: "NEW_PROJECT_CLICKED", attempt, clickedText: cta.text, urlBefore, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CLICKED", attempt, clickedText: cta.text, urlBefore }) });
 
       // Wait for the workspace/editor to load a visible prompt input.
       const ws = await waitForVisiblePrompt(flowTabId, runner, 30000);
