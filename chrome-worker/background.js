@@ -14,7 +14,13 @@
 // implemented yet (do not fake them).
 // ===========================================================================
 
-const VERSION = "0.5.2";
+const VERSION = "0.5.3";
+// Runtime build identifier — included in PONG/STATUS/persistFlowDebug so the web
+// app and Admin viewer can prove which background.js revision is actually running
+// in the Chrome extension. If PONG/STATUS lack flowWorkerBuild, or a flowDebug
+// diagnostic lacks it, the extension is running a stale revision and must be
+// reloaded (chrome://extensions → Reload) after updating the worker files.
+const FLOW_WORKER_BUILD = "0.5.3-build1";
 const EXECUTION = "CHROME_WORKER";
 const MODE = "LOCAL_WORKER";
 
@@ -192,10 +198,11 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
         requestId,
         workerOnline: true,
         version: VERSION,
+        flowWorkerBuild: FLOW_WORKER_BUILD,
         execution: EXECUTION,
         mode: MODE,
       });
-      console.log("[AffiliateOS Worker] PONG sent", { requestId, version: VERSION });
+      console.log("[AffiliateOS Worker] PONG sent", { requestId, version: VERSION, flowWorkerBuild: FLOW_WORKER_BUILD });
       return false;
 
     case "AFFILIATEOS_STATUS": {
@@ -207,6 +214,7 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
         requestId,
         workerOnline: true,
         version: VERSION,
+        flowWorkerBuild: FLOW_WORKER_BUILD,
         execution: EXECUTION,
         mode: MODE,
         phase: state.phase,
@@ -478,7 +486,7 @@ function persistFlowDebug(patch) {
   try {
     chrome.storage.local.set({
       [`flowDebug_${jobId}`]: Object.assign(
-        { jobId, capturedAt: new Date().toISOString() },
+        { jobId, flowWorkerBuild: FLOW_WORKER_BUILD, capturedAt: new Date().toISOString() },
         patch
       ),
     });
