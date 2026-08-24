@@ -467,6 +467,23 @@ function flowFail(runner, reason, detail) {
   return { ok: false, state: reason, detail };
 }
 
+// Persist the Flow diagnostic to flowDebug_<jobId>. Called at multiple stages
+// (INSPECT, NO_PROMPT_INPUT, …) so a diagnostic is ALWAYS available even when
+// the run fails before verification. The verification stage later overwrites
+// this with the full before/after DOM diagnostic when reached.
+function persistFlowDebug(patch) {
+  const jobId = state.jobId || state.lastJobId;
+  if (!jobId) return;
+  try {
+    chrome.storage.local.set({
+      [`flowDebug_${jobId}`]: Object.assign(
+        { jobId, capturedAt: new Date().toISOString() },
+        patch
+      ),
+    });
+  } catch {}
+}
+
 function buildPrompt(job) {
   const j = job || {};
   if (j.video_prompt && String(j.video_prompt).trim()) return String(j.video_prompt);
@@ -543,16 +560,40 @@ async function runGoogleFlow(job, runner) {
   // 1. Inspect the real UI before acting.
   const inspect = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "inspect" });
   console.log("[AffiliateOS Worker] Google Flow inspection", inspect);
-  if (!inspect || !inspect.ok) { flowFail(runner, "NO_INSPECTION_RESPONSE", inspect && inspect.snapshot); return; }
-  if (inspect.snapshot && inspect.snapshot.needsLogin) { flowFail(runner, "NEEDS_LOGIN", inspect.snapshot); return; }
+  if (!inspect || !inspect.ok) {
+    persistFlowDebug({ stage: "NO_INSPECTION_RESPONSE", failureStage: "NO_INSPECTION_RESPONSE", snapshot: (inspect && inspect.snapshot) || null });
+    flowFail(runner, "NO_INSPECTION_RESPONSE", inspect && inspect.snapshot);
+    return;
+  }
+  if (inspect.snapshot && inspect.snapshot.needsLogin) {
+    persistFlowDebug({ stage: "NEEDS_LOGIN", failureStage: "NEEDS_LOGIN", snapshot: inspect.snapshot });
+    flowFail(runner, "NEEDS_LOGIN", inspect.snapshot);
+    return;
+  }
+
+  // Persist the initial page snapshot immediately so a diagnostic is ALWAYS
+  // available — even if the run fails before verification (e.g. NO_PROMPT_INPUT).
+  persistFlowDebug({ stage: "INSPECT", snapshot: inspect.snapshot });
 
   setStatus({ phase: "FLOW_PROJECT_READY", lastAction: "Google Flow project ready" });
 
   // 2. Enter the prompt.
   const prompt = buildPrompt(job);
-  if (!prompt) { flowFail(runner, "NO_PROMPT"); return; }
+  if (!prompt) {
+    persistFlowDebug({ stage: "NO_PROMPT", failureStage: "NO_PROMPT", snapshot: inspect.snapshot });
+    flowFail(runner, "NO_PROMPT");
+    return;
+  }
   const entered = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "enterPrompt", prompt });
-  if (!entered || !entered.ok) { flowFail(runner, (entered && entered.state) || "NO_PROMPT_INPUT", entered && entered.snapshot); return; }
+  if (!entered || !entered.ok) {
+    const reason = (entered && entered.state) || "NO_PROMPT_INPUT";
+    const snap = (entered && entered.snapshot) || inspect.snapshot;
+    // Persist the failure snapshot to BOTH flowDebug and flowDetail (flowFail
+    // writes flowDetail) so the Admin viewer shows evidence at NO_PROMPT_INPUT.
+    persistFlowDebug({ stage: reason, failureStage: reason, snapshot: snap });
+    flowFail(runner, reason, snap);
+    return;
+  }
 
   // Capture project/result state BEFORE generating (used to prove a NEW result).
   const before = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "captureBefore" });
