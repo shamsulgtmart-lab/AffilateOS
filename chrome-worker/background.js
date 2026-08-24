@@ -627,7 +627,7 @@ async function runGoogleFlow(job, runner) {
         flowFail(runner, "NO_LANDING_CTA", { attempt, clickedTexts, snapshot: lastSnapshot });
         return;
       }
-      persistFlowDebug({ stage: "NEW_PROJECT_CTA_FOUND", ctaFound: true, attempt, ctaText: cta.text, ctaTag: cta.tag, ctaSource: cta.source, ctaOuterHTML: cta.outerHTML, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text, ctaTag: cta.tag, ctaSource: cta.source }) });
+      persistFlowDebug({ stage: "NEW_PROJECT_CTA_FOUND", ctaFound: true, attempt, ctaText: cta.text, ctaRawText: cta.rawText, ctaTag: cta.tag, ctaSource: cta.source, ctaOuterHTML: cta.outerHTML, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text, ctaRawText: cta.rawText, ctaTag: cta.tag, ctaSource: cta.source }) });
       const urlBefore = cta.url;
       const clicked = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "clickLandingCta", text: cta.text }, 10000);
       if (!clicked || !clicked.ok) {
