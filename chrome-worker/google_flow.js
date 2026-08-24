@@ -430,63 +430,100 @@ if (!window.__affiliateosFlowInjected) {
     return acc;
   }
 
-  // Strip icon-element text (Material Symbols ligatures like "add_2", lucide
-  // icons, svg) and normalize whitespace so a button rendered as
-  // "<button><i>add_2</i>New project</button>" yields the clean label
-  // "New project" — not "add_2\nNew project". This makes text matching reliable
-  // without depending on unstable CSS classes.
-  function cleanLabel(el) {
+  // Normalize a button's label by removing Material Symbol / icon text so a button
+  // rendered as "<button><span>add_2</span>New project</button>" (raw text
+  // "add_2\nNew project") yields the clean label "New project". Removes icon
+  // elements by selector, then strips a leading Material Symbol ligature token
+  // (lowercase letters/digits/underscores, e.g. "add_2", "edit", "delete")
+  // that precedes the real label. The real label starts with an uppercase
+  // letter, so a lowercase-leading real label is never stripped.
+  function normalizeButtonLabel(el) {
     let clone;
     try { clone = el.cloneNode(true); } catch { clone = el; }
     try {
-      clone.querySelectorAll('i, svg, [class*="material-symbols" i], [class*="material-icons" i]').forEach((n) => n.remove());
+      clone.querySelectorAll('i, svg, mat-icon, [class*="material-symbols" i], [class*="material-icons" i], [class*="mat-icon" i], [class*="symbol" i], [aria-hidden="true"]').forEach((n) => n.remove());
     } catch {}
-    return ((clone.textContent || "") + "").replace(/\s+/g, " ").trim();
+    let text = ((clone.textContent || "") + "").replace(/\s+/g, " ").trim();
+    // Strip a leading Material Symbol ligature token (e.g. "add_2") that
+    // precedes the real label. Ligature tokens are lowercase letters/digits/
+    // underscores with no spaces; the real label starts uppercase.
+    text = text.replace(/^[a-z][a-z0-9_]*\s+(?=[A-Z0-9])/, "").trim();
+    return text;
   }
 
   function findLandingCta(excludeTexts) {
     const excl = new Set((excludeTexts || []).map((t) => String(t).trim().toLowerCase()));
     // The ONLY accepted landing/workspace-entry CTA is the real "New project"
-    // button (cleaned label). Promotional/banner CTAs ("Get started", "Learn
+    // button (normalized label). Promotional/banner CTAs ("Get started", "Learn
     // More", "Explore Tools", "Create your avatar", "Try now", …) and
     // project-row actions ("Edit project", "Delete project") are explicitly
     // rejected — never clicked, even as a fallback. This guarantees "Get
     // started" can never open the avatar modal. "New project" always wins.
     const reject = /^(get started|learn more|explore tools|create your avatar|edit project|delete project|try omi now|try now|start now|create now|create a character)$/i;
-    const primary = /^new project$/i;
-    let match = null;
+    const target = "new project";
+    // Diagnostics: every visible button candidate (raw + normalized label) so the
+    // admin viewer shows exactly why a match did or did not happen.
     const candidates = [];
-    const clickable = collectClickableDeep();
-    for (const { el, source } of clickable) {
-      if (!visible(el)) continue;
-      if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
-      const raw = (el.innerText || el.getAttribute("aria-label") || "").trim();
-      const clean = cleanLabel(el);
-      if (!clean) continue;
-      candidates.push({
-        text: clean,
-        rawText: raw,
-        tag: (el.tagName || "").toLowerCase(),
-        source,
-        disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
-        outerHTML: (el.outerHTML || "").slice(0, 500),
+    let matched = null;
+
+    // Scan visible MAIN-DOCUMENT buttons first. The diagnostic proved the visible
+    // "New project" button lives in the main document with raw text
+    // "add_2\nNew project" — normalizeButtonLabel strips the icon ligature so the
+    // normalized label is exactly "New project". No shadow-root traversal, CTA
+    // heuristics, or fallback labels are required for this exact match.
+    try {
+      document.querySelectorAll('button, [role="button"]').forEach((el) => {
+        if (!visible(el)) return;
+        if (el.disabled === true || el.getAttribute("aria-disabled") === "true") return;
+        const raw = (el.innerText || el.getAttribute("aria-label") || "").trim();
+        const clean = normalizeButtonLabel(el);
+        const c = { index: candidates.length, rawText: raw, clean, tag: (el.tagName || "").toLowerCase(), source: "main", outerHTML: (el.outerHTML || "").slice(0, 500) };
+        candidates.push(c);
+        if (!matched && clean && clean.toLowerCase() === target && !excl.has(clean.toLowerCase()) && !reject.test(clean)) {
+          matched = c;
+        }
       });
-      if (excl.has(clean.toLowerCase())) continue;
-      if (reject.test(clean)) continue;
-      if (primary.test(clean) && !match) {
-        match = {
-          ok: true,
-          text: clean,
-          rawText: raw,
-          tag: (el.tagName || "").toLowerCase(),
-          source,
-          outerHTML: (el.outerHTML || "").slice(0, 500),
-          url: location.href,
-          candidateCount: candidates.length,
-        };
-      }
+    } catch {}
+
+    // Shadow-root fallback only if the main-document scan did not find the target.
+    if (!matched) {
+      try {
+        document.querySelectorAll("*").forEach((el) => {
+          if (matched || !el.shadowRoot) return;
+          try {
+            el.shadowRoot.querySelectorAll('button, [role="button"]').forEach((btn) => {
+              if (matched) return;
+              if (!visible(btn)) return;
+              if (btn.disabled === true || btn.getAttribute("aria-disabled") === "true") return;
+              const raw = (btn.innerText || btn.getAttribute("aria-label") || "").trim();
+              const clean = normalizeButtonLabel(btn);
+              const c = { index: candidates.length, rawText: raw, clean, tag: (btn.tagName || "").toLowerCase(), source: "shadow", outerHTML: (btn.outerHTML || "").slice(0, 500) };
+              candidates.push(c);
+              if (clean && clean.toLowerCase() === target && !excl.has(clean.toLowerCase()) && !reject.test(clean)) {
+                matched = c;
+              }
+            });
+          } catch {}
+        });
+      } catch {}
     }
-    return match || {
+
+    if (matched) {
+      return {
+        ok: true,
+        text: matched.clean,
+        rawText: matched.rawText,
+        tag: matched.tag,
+        source: matched.source,
+        outerHTML: matched.outerHTML,
+        url: location.href,
+        landingButtonCandidates: candidates.slice(0, 50),
+        matchedNewProject: matched.clean,
+        matchedOuterHTML: matched.outerHTML,
+        matchedIndex: matched.index,
+      };
+    }
+    return {
       ok: false,
       text: null,
       rawText: null,
@@ -494,8 +531,10 @@ if (!window.__affiliateosFlowInjected) {
       source: null,
       outerHTML: null,
       url: location.href,
-      candidateCount: candidates.length,
-      candidates: candidates.slice(-50),
+      landingButtonCandidates: candidates.slice(0, 50),
+      matchedNewProject: null,
+      matchedOuterHTML: null,
+      matchedIndex: null,
     };
   }
 
@@ -504,7 +543,7 @@ if (!window.__affiliateosFlowInjected) {
     for (const { el, source } of collectClickableDeep()) {
       if (!visible(el)) continue;
       if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
-      const clean = cleanLabel(el);
+      const clean = normalizeButtonLabel(el);
       if (!clean) continue;
       if (clean.toLowerCase() === target) {
         const urlBefore = location.href;
