@@ -24,7 +24,7 @@ if (!window.__affiliateosFlowInjected) {
   // viewer can prove which google_flow.js revision is actually executing in the
   // running Chrome extension (stale-code detection). If a diagnostic lacks this
   // field, the extension is running an older revision.
-  const FLOW_WORKER_BUILD = "0.5.3-build2";
+  const FLOW_WORKER_BUILD = "0.5.3-build3";
 
   function dbg(entry) {
     try { window.__affiliateosDebug.steps.push({ t: Date.now(), ...entry }); } catch {}
@@ -161,6 +161,14 @@ if (!window.__affiliateosFlowInjected) {
     return fallback;
   }
 
+  // Read the current text from an input/contenteditable element — used to verify
+  // that setText() actually registered the prompt in the editor's internal state.
+  function getPromptText(el) {
+    if (!el) return "";
+    if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") return (el.value || "").trim();
+    return ((el.innerText || el.textContent || "") + "").trim();
+  }
+
   function setText(el, text) {
     if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
       try {
@@ -170,11 +178,52 @@ if (!window.__affiliateosFlowInjected) {
       } catch { el.value = text; }
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
-    } else {
-      el.focus();
-      el.innerText = text;
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+      return true;
     }
+
+    // Google Flow uses a Slate contenteditable editor. Directly assigning innerText
+    // is not enough for Slate/React state — the UI can still show the placeholder
+    // and keep Create disabled even though the DOM contains our text. We use the
+    // browser's real editing command (document.execCommand('insertText')) which
+    // fires the beforeinput/input events that Slate listens to for state updates.
+    // This is the same path the browser takes when a user types — Slate's internal
+    // model is updated, not just the DOM.
+    el.focus();
+    let inserted = false;
+    try {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      // Delete existing selection first so we start clean — without this, Slate
+      // may keep the old text and append, or the selection may not be properly
+      // cleared, causing execCommand('insertText') to insert at the wrong position.
+      sel.deleteFromSelection();
+      // execCommand('insertText') fires the proper beforeinput/input events that
+      // Slate and other contenteditable frameworks listen to for state updates. This
+      // is the same path the browser takes when a user types into the editor.
+      inserted = document.execCommand("insertText", false, text);
+    } catch {}
+
+    // Fallback: if execCommand failed or is unavailable, try dispatching a
+    // beforeinput event with insertText inputType — Slate listens for this to
+    // update its internal model. As a last resort, set textContent and fire input.
+    if (!inserted) {
+      const current = getPromptText(el);
+      if (current !== String(text).trim()) {
+        try {
+          el.textContent = text;
+          el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, data: text, inputType: "insertText" }));
+          el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+        } catch {
+          el.textContent = text;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      }
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    return inserted;
   }
 
   function videoSrc(v) {
@@ -620,11 +669,29 @@ if (!window.__affiliateosFlowInjected) {
         if (action === "enterPrompt") {
           const snap = snapshot();
           if (snap.needsLogin) return { ok: false, state: "NEEDS_LOGIN", snapshot: snap };
+          const prompt = String(msg.prompt || "");
           const input = findPromptInput();
           if (!input) return { ok: false, state: "NO_PROMPT_INPUT", snapshot: snap };
-          setText(input, msg.prompt || "");
-          dbg({ step: "enterPrompt", length: (msg.prompt || "").length });
-          return { ok: true, state: "ENTERED" };
+          const inserted = setText(input, prompt);
+
+          // Verify the editor actually accepted the prompt before allowing the worker
+          // to click Create. This prevents a false "ENTERED" result when Slate/React
+          // ignored the input (e.g. execCommand failed, internal state didn't update)
+          // and the Create button remains disabled. We wait briefly for Slate to sync
+          // its internal model, then check that the editor's current text matches.
+          await new Promise((r) => setTimeout(r, 300));
+          const actual = getPromptText(input);
+          // Accept if the editor contains the prompt text (check a meaningful prefix
+          // and the full length, since Slate may add extra whitespace/nodes).
+          const promptTrim = prompt.trim();
+          const prefix = promptTrim.slice(0, Math.min(80, promptTrim.length));
+          const accepted = !!promptTrim && actual.includes(prefix) && actual.length >= promptTrim.length * 0.5;
+          const snapAfter = snapshot();
+          const btn = findGenerateButton();
+          const btnDisabled = btn ? (btn.disabled === true || btn.getAttribute("aria-disabled") === "true") : null;
+          dbg({ step: "enterPrompt", length: promptTrim.length, inserted, accepted, actualLength: actual.length, actualExcerpt: actual.slice(0, 80), generateButtonDisabled: btnDisabled });
+          if (!accepted) return { ok: false, state: "PROMPT_NOT_ACCEPTED", inserted, snapshot: snapAfter, actualText: actual.slice(0, 200), generateButtonDisabled: btnDisabled };
+          return { ok: true, state: "ENTERED", inserted, snapshot: snapAfter, actualText: actual.slice(0, 200), generateButtonDisabled: btnDisabled };
         }
         if (action === "captureBefore") {
           return { ok: true, state: "CAPTURED", fingerprint: captureBefore() };
