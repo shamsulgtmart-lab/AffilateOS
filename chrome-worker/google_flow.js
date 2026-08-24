@@ -24,7 +24,7 @@ if (!window.__affiliateosFlowInjected) {
   // viewer can prove which google_flow.js revision is actually executing in the
   // running Chrome extension (stale-code detection). If a diagnostic lacks this
   // field, the extension is running an older revision.
-  const FLOW_WORKER_BUILD = "0.5.3-build1";
+  const FLOW_WORKER_BUILD = "0.5.3-build2";
 
   function dbg(entry) {
     try { window.__affiliateosDebug.steps.push({ t: Date.now(), ...entry }); } catch {}
@@ -183,7 +183,18 @@ if (!window.__affiliateosFlowInjected) {
 
   function processingSignals() {
     const sigs = [];
-    const bodyText = document.body ? (document.body.innerText || "") : "";
+    let bodyText = document.body ? (document.body.innerText || "") : "";
+    // Strip static UI placeholder texts that contain processing keywords but are NOT
+    // actual processing states. "Start creating or drop media" is Google Flow's
+    // empty-state instruction — it contains "creating" but means NO generation is
+    // happening. Without stripping it, the "text:creating" signal is present both
+    // before AND after clicking Generate, so it never appears as a NEW signal and
+    // masks the real generation state change. Stripping it ensures the only
+    // "creating" match is the real "Creating..." / "Generating..." progress text.
+    bodyText = bodyText.replace(/start\s+creating\s+or\s+drop\s+media/gi, "");
+    bodyText = bodyText.replace(/drop\s+(media|files?|your)\s+(here|to\s+upload)/gi, "");
+    bodyText = bodyText.replace(/drag\s+and\s+drop|drag\s+&\s+drop/gi, "");
+    bodyText = bodyText.replace(/start\s+creating\b/gi, "");
     const kw = bodyText.match(/(generating|rendering|processing|creating|queued|in progress|in queue|working on|preparing|building|encoding|seconds?\s*(?:left|remaining)|\d{1,3}\s*%)/i);
     if (kw) sigs.push("text:" + kw[0].toLowerCase());
     for (const el of document.querySelectorAll('[role="progressbar"], [aria-busy="true"], [aria-valuenow]')) {
@@ -195,7 +206,13 @@ if (!window.__affiliateosFlowInjected) {
     const gen = findGenerateButton();
     if (gen) {
       const t = (gen.innerText || gen.getAttribute("aria-label") || "").trim().toLowerCase();
-      if (gen.disabled || gen.getAttribute("aria-disabled") === "true") sigs.push("generate-disabled");
+      const isDisabled = gen.disabled === true || gen.getAttribute("aria-disabled") === "true";
+      const isBusy = gen.getAttribute("aria-busy") === "true";
+      // A disabled or busy Create/Generate button is a reliable processing signal —
+      // Google Flow disables the button while generation is in progress. This is
+      // detected as a NEW signal in detectGenerationStart() because it was not
+      // present before the click.
+      if (isDisabled || isBusy) sigs.push("generate-disabled");
       else if (/generating|rendering|processing|creating|working/.test(t)) sigs.push("generate-label");
     }
     return Array.from(new Set(sigs));
@@ -222,6 +239,7 @@ if (!window.__affiliateosFlowInjected) {
     const genState = gen ? {
       text: (gen.innerText || gen.getAttribute("aria-label") || "").trim().slice(0, 80),
       disabled: gen.disabled === true || gen.getAttribute("aria-disabled") === "true",
+      busy: gen.getAttribute("aria-busy") === "true",
     } : null;
     const fp = {
       timestamp: nowIso(),
@@ -253,7 +271,13 @@ if (!window.__affiliateosFlowInjected) {
         if (gen && beforeGen) {
           const t = (gen.innerText || gen.getAttribute("aria-label") || "").trim().slice(0, 80);
           const dis = gen.disabled === true || gen.getAttribute("aria-disabled") === "true";
+          const busy = gen.getAttribute("aria-busy") === "true";
+          // A disabled OR busy state change on the Create/Generate button proves the
+          // click caused a real generation state transition (button becomes disabled
+          // while processing). This catches the case where the button text doesn't
+          // change but the disabled/busy attribute does.
           if (dis !== beforeGen.disabled) genChanged = true;
+          if (busy !== beforeGen.busy) genChanged = true;
           if (t !== beforeGen.text) genChanged = true;
         }
         if (newSigs.length || genChanged) {
