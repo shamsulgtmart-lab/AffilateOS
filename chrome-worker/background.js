@@ -623,8 +623,8 @@ async function runGoogleFlow(job, runner) {
       // Find the next real visible CTA (excluding ones already clicked).
       const cta = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "findLandingCta", excludeTexts: clickedTexts }, 10000);
       if (!cta || !cta.ok || !cta.text) {
-        persistFlowDebug({ stage: "NO_LANDING_CTA", failureStage: "NO_LANDING_CTA", ctaFound: false, attempt, snapshot: lastSnapshot, clickedTexts, diagSteps: logDiag({ step: "NO_LANDING_CTA", attempt }) });
-        flowFail(runner, "NO_LANDING_CTA", { attempt, clickedTexts, snapshot: lastSnapshot });
+        persistFlowDebug({ stage: "NO_LANDING_CTA", failureStage: "NO_LANDING_CTA", ctaFound: false, attempt, candidateCount: cta && cta.candidateCount || 0, candidates: cta && cta.candidates || [], snapshot: lastSnapshot, clickedTexts, diagSteps: logDiag({ step: "NO_LANDING_CTA", attempt, candidateCount: cta && cta.candidateCount || 0 }) });
+        flowFail(runner, "NO_LANDING_CTA", { attempt, clickedTexts, snapshot: lastSnapshot, candidateCount: cta && cta.candidateCount || 0, candidates: cta && cta.candidates || [] });
         return;
       }
       persistFlowDebug({ stage: "NEW_PROJECT_CTA_FOUND", ctaFound: true, attempt, ctaText: cta.text, ctaRawText: cta.rawText, ctaTag: cta.tag, ctaSource: cta.source, ctaOuterHTML: cta.outerHTML, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text, ctaRawText: cta.rawText, ctaTag: cta.tag, ctaSource: cta.source }) });
@@ -664,9 +664,40 @@ async function runGoogleFlow(job, runner) {
       flowFail(runner, "NO_PROMPT_INPUT_AFTER_LANDING_CTA", { attempts: attempt, snapshot: lastSnapshot, clickedTexts });
       return;
     }
-  }
+    }
 
-  setStatus({ phase: "FLOW_PROJECT_READY", lastAction: "Google Flow project ready" });
+    // DRY-RUN navigation test: stop here. No prompt entry, no Generate click, no
+    // video generation, no Flow credits spent. The complete per-step navigation
+    // diagnostic (LANDING_PAGE_DETECTED → NEW_PROJECT_CTA_FOUND →
+    // NEW_PROJECT_CLICKED → WORKSPACE_LOADED/NOT_LOADED) is captured in diagSteps
+    // regardless of outcome. Real jobs (no dry_run flag) are unaffected.
+    if (job.dry_run) {
+    const navState = promptReady ? "NAV_TEST_PASSED" : "NAV_TEST_FAILED";
+    const navTest = {
+    ok: promptReady,
+    state: navState,
+    promptReady,
+    landingPageDetected: !!(clickedTexts && clickedTexts.length),
+    clickedTexts,
+    lastUrlAfter,
+    snapshot: lastSnapshot,
+    promptCandidates: lastCandidates,
+    };
+    persistFlowDebug({
+    stage: "FLOW_NAV_TEST_RESULT",
+    navTest,
+    diagSteps: logDiag({ step: "FLOW_NAV_TEST_RESULT", ok: promptReady, state: navState, clickedTexts, lastUrlAfter }),
+    });
+    setStatus({
+    phase: promptReady ? "FLOW_NAV_TEST_DONE" : "FLOW_NAV_TEST_FAILED",
+    lastAction: promptReady ? "Dry-run navigation test passed (no video generated)" : "Dry-run navigation test failed",
+    flowError: promptReady ? null : "NAV_TEST_FAILED",
+    });
+    console.log("[AffiliateOS Worker] Dry-run navigation test complete", navTest);
+    return;
+    }
+
+    setStatus({ phase: "FLOW_PROJECT_READY", lastAction: "Google Flow project ready" });
 
   // 2. Enter the prompt.
   const prompt = buildPrompt(job);
