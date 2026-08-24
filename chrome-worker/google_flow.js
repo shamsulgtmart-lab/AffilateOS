@@ -20,6 +20,11 @@
 if (!window.__affiliateosFlowInjected) {
   window.__affiliateosFlowInjected = true;
   window.__affiliateosDebug = { steps: [] };
+  // Runtime build identifier — included in every snapshot/diagnostic so the Admin
+  // viewer can prove which google_flow.js revision is actually executing in the
+  // running Chrome extension (stale-code detection). If a diagnostic lacks this
+  // field, the extension is running an older revision.
+  const FLOW_WORKER_BUILD = "0.5.3-build1";
 
   function dbg(entry) {
     try { window.__affiliateosDebug.steps.push({ t: Date.now(), ...entry }); } catch {}
@@ -125,6 +130,7 @@ if (!window.__affiliateosFlowInjected) {
       inputs: acc.inputs.slice(0, 50),
       buttons: acc.buttons.slice(0, 60),
       bodyExcerpt: bodyText.slice(0, 600),
+      flowWorkerBuild: FLOW_WORKER_BUILD,
     };
   }
 
