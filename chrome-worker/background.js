@@ -20,7 +20,7 @@ const VERSION = "0.5.3";
 // in the Chrome extension. If PONG/STATUS lack flowWorkerBuild, or a flowDebug
 // diagnostic lacks it, the extension is running a stale revision and must be
 // reloaded (chrome://extensions → Reload) after updating the worker files.
-const FLOW_WORKER_BUILD = "0.5.3-build1";
+const FLOW_WORKER_BUILD = "0.5.3-build2";
 const EXECUTION = "CHROME_WORKER";
 const MODE = "LOCAL_WORKER";
 
