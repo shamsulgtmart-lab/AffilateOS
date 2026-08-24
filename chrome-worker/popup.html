@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AffiliateOS Worker</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        width: 260px;
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: #ffffff;
+        color: #0f172a;
+      }
+      .head {
+        padding: 14px 16px 10px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .head h1 { font-size: 14px; font-weight: 600; margin: 0; }
+      .head .ver { font-size: 11px; color: #64748b; margin-top: 2px; }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 9px 16px;
+        font-size: 12px;
+        border-bottom: 1px solid #f1f5f9;
+      }
+      .row:last-child { border-bottom: none; }
+      .label { color: #475569; }
+      .val { font-weight: 600; }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+      .green { background: #22c55e; }
+      .amber { background: #f59e0b; }
+      .slate { background: #94a3b8; }
+      .muted { color: #94a3b8; font-weight: 500; }
+      .ok { color: #16a34a; }
+      .foot { padding: 9px 16px; font-size: 11px; color: #94a3b8; }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <h1>AffiliateOS Worker</h1>
+      <div class="ver" id="version">v0.5.2 · Phase 2 Generation</div>
+    </div>
+    <div class="row">
+      <span class="label">Worker</span>
+      <span class="val ok"><span class="dot green"></span>Online</span>
+    </div>
+    <div class="row">
+      <span class="label">Google Flow</span>
+      <span class="val" id="flow"><span class="dot slate"></span>Not Open</span>
+    </div>
+    <div class="row">
+      <span class="label">TikTok Studio</span>
+      <span class="val" id="tiktok"><span class="dot slate"></span>Not Open</span>
+    </div>
+    <div class="row">
+      <span class="label">Last Job</span>
+      <span class="val muted" id="lastjob">—</span>
+    </div>
+    <div class="foot" id="lastaction">Idle</div>
+    <script src="popup.js"></script>
+  </body>
+</html>
