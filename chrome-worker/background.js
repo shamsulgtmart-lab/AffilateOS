@@ -284,6 +284,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === "POPUP_GET_STATUS") {
     sendResponse({
       version: VERSION,
+      flowWorkerBuild: FLOW_WORKER_BUILD,
       phase: state.phase,
       flowStatus: state.flowStatus,
       tiktokStatus: state.tiktokStatus,
