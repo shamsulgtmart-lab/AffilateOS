@@ -446,26 +446,36 @@ if (!window.__affiliateosFlowInjected) {
 
   function findLandingCta(excludeTexts) {
     const excl = new Set((excludeTexts || []).map((t) => String(t).trim().toLowerCase()));
-    // Primary: the observed "New project" button (cleaned label). Fallback:
-    // other common landing CTAs. Never matches "Edit project" or
-    // "Delete project" — those cleaned labels do not contain "new project".
+    // The ONLY accepted landing/workspace-entry CTA is the real "New project"
+    // button (cleaned label). Promotional/banner CTAs ("Get started", "Learn
+    // More", "Explore Tools", "Create your avatar", "Try now", …) and
+    // project-row actions ("Edit project", "Delete project") are explicitly
+    // rejected — never clicked, even as a fallback. This guarantees "Get
+    // started" can never open the avatar modal. "New project" always wins.
+    const reject = /^(get started|learn more|explore tools|create your avatar|edit project|delete project|try omi now|try now|start now|create now|create a character)$/i;
     const primary = /^new project$/i;
-    const strong = /^(get started|try omi now|create a character|start now|try now|create now|start creating|begin|continue|open editor|launch)$/i;
-    let primaryMatch = null;
-    let fallback = null;
+    let match = null;
     for (const { el, source } of collectClickableDeep()) {
       if (!visible(el)) continue;
       if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
+      const raw = (el.innerText || el.getAttribute("aria-label") || "").trim();
       const clean = cleanLabel(el);
       if (!clean) continue;
       if (excl.has(clean.toLowerCase())) continue;
-      const tag = (el.tagName || "").toLowerCase();
-      const outerHTML = (el.outerHTML || "").slice(0, 500);
-      const rec = { ok: true, text: clean, tag, source, outerHTML, url: location.href };
-      if (primary.test(clean) && !primaryMatch) primaryMatch = rec;
-      if (strong.test(clean) && !fallback) fallback = rec;
+      if (reject.test(clean)) continue;
+      if (primary.test(clean) && !match) {
+        match = {
+          ok: true,
+          text: clean,
+          rawText: raw,
+          tag: (el.tagName || "").toLowerCase(),
+          source,
+          outerHTML: (el.outerHTML || "").slice(0, 500),
+          url: location.href,
+        };
+      }
     }
-    return primaryMatch || fallback || { ok: false, text: null, tag: null, source: null, outerHTML: null, url: location.href };
+    return match || { ok: false, text: null, rawText: null, tag: null, source: null, outerHTML: null, url: location.href };
   }
 
   function clickLandingCta(text) {
