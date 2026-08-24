@@ -623,11 +623,11 @@ async function runGoogleFlow(job, runner) {
       // Find the next real visible CTA (excluding ones already clicked).
       const cta = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "findLandingCta", excludeTexts: clickedTexts }, 10000);
       if (!cta || !cta.ok || !cta.text) {
-        persistFlowDebug({ stage: "NO_LANDING_CTA", failureStage: "NO_LANDING_CTA", attempt, snapshot: lastSnapshot, clickedTexts, diagSteps: logDiag({ step: "NO_LANDING_CTA", attempt }) });
+        persistFlowDebug({ stage: "NO_LANDING_CTA", failureStage: "NO_LANDING_CTA", ctaFound: false, attempt, snapshot: lastSnapshot, clickedTexts, diagSteps: logDiag({ step: "NO_LANDING_CTA", attempt }) });
         flowFail(runner, "NO_LANDING_CTA", { attempt, clickedTexts, snapshot: lastSnapshot });
         return;
       }
-      persistFlowDebug({ stage: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text }) });
+      persistFlowDebug({ stage: "NEW_PROJECT_CTA_FOUND", ctaFound: true, attempt, ctaText: cta.text, ctaTag: cta.tag, ctaSource: cta.source, ctaOuterHTML: cta.outerHTML, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CTA_FOUND", attempt, ctaText: cta.text, ctaTag: cta.tag, ctaSource: cta.source }) });
       const urlBefore = cta.url;
       const clicked = await sendToFlow(flowTabId, { type: "AFFILIATEOS_FLOW_RUN", action: "clickLandingCta", text: cta.text }, 10000);
       if (!clicked || !clicked.ok) {
@@ -636,7 +636,7 @@ async function runGoogleFlow(job, runner) {
         return;
       }
       clickedTexts.push(cta.text);
-      persistFlowDebug({ stage: "NEW_PROJECT_CLICKED", attempt, clickedText: cta.text, urlBefore, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CLICKED", attempt, clickedText: cta.text, urlBefore }) });
+      persistFlowDebug({ stage: "NEW_PROJECT_CLICKED", attempt, clickedText: cta.text, clickedSource: clicked.source || cta.source, urlBefore, snapshot: lastSnapshot, diagSteps: logDiag({ step: "NEW_PROJECT_CLICKED", attempt, clickedText: cta.text, urlBefore }) });
 
       // Wait for the workspace/editor to load a visible prompt input.
       const ws = await waitForVisiblePrompt(flowTabId, runner, 30000);
