@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "AffiliateOS Worker",
+  "version": "0.5.2",
+  "description": "Browser automation worker for AffiliateOS.",
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AffiliateOS Worker"
+  },
+  "permissions": ["storage", "tabs", "windows", "scripting"],
+  "host_permissions": ["https://flow.google/*", "https://labs.google/*", "https://labs.google.com/*", "https://www.tiktok.com/*"],
+  "externally_connectable": {
+    "matches": [
+      "https://affiliate-os.base44.app/*",
+      "https://affiliate-flow-os.base44.app/*"
+    ]
+  }
+}
