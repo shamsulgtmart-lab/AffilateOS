@@ -411,52 +411,75 @@ if (!window.__affiliateosFlowInjected) {
   // it, then re-inspect. They do NOT touch findPromptInput / findGenerateButton
   // / verification — those remain unchanged. "Edit project" / "Delete project"
   // are never matched.
-  function queryAllDeep(selector, root, acc) {
-    root = root || document;
-    acc = acc || [];
-    try {
-      root.querySelectorAll(selector).forEach((el) => acc.push(el));
-    } catch {}
-    try {
-      root.querySelectorAll("*").forEach((el) => {
-        if (el.shadowRoot) queryAllDeep(selector, el.shadowRoot, acc);
-      });
-    } catch {}
+  // Collect clickable elements from the main document AND all open shadow roots,
+  // tagging each with its source so diagnostics can report where the match came
+  // from. Does NOT rely on Google-generated class names.
+  function collectClickableDeep() {
+    const acc = [];
+    function walk(root, source) {
+      try {
+        root.querySelectorAll('button, [role="button"], a').forEach((el) => acc.push({ el, source }));
+      } catch {}
+      try {
+        root.querySelectorAll("*").forEach((el) => {
+          if (el.shadowRoot) walk(el.shadowRoot, source + ">shadow");
+        });
+      } catch {}
+    }
+    walk(document, "main");
     return acc;
+  }
+
+  // Strip icon-element text (Material Symbols ligatures like "add_2", lucide
+  // icons, svg) and normalize whitespace so a button rendered as
+  // "<button><i>add_2</i>New project</button>" yields the clean label
+  // "New project" — not "add_2\nNew project". This makes text matching reliable
+  // without depending on unstable CSS classes.
+  function cleanLabel(el) {
+    let clone;
+    try { clone = el.cloneNode(true); } catch { clone = el; }
+    try {
+      clone.querySelectorAll('i, svg, [class*="material-symbols" i], [class*="material-icons" i]').forEach((n) => n.remove());
+    } catch {}
+    return ((clone.textContent || "") + "").replace(/\s+/g, " ").trim();
   }
 
   function findLandingCta(excludeTexts) {
     const excl = new Set((excludeTexts || []).map((t) => String(t).trim().toLowerCase()));
-    // Primary: the observed "New project" button. Fallback: other common
-    // landing CTAs. Never match "Edit project" or "Delete project".
-    const primary = /^(new project)$/i;
+    // Primary: the observed "New project" button (cleaned label). Fallback:
+    // other common landing CTAs. Never matches "Edit project" or
+    // "Delete project" — those cleaned labels do not contain "new project".
+    const primary = /^new project$/i;
     const strong = /^(get started|try omi now|create a character|start now|try now|create now|start creating|begin|continue|open editor|launch)$/i;
     let primaryMatch = null;
     let fallback = null;
-    for (const el of queryAllDeep('button, [role="button"], a')) {
+    for (const { el, source } of collectClickableDeep()) {
       if (!visible(el)) continue;
       if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
-      const t = (el.innerText || el.getAttribute("aria-label") || "").trim();
-      if (!t) continue;
-      if (excl.has(t.toLowerCase())) continue;
-      if (primary.test(t) && !primaryMatch) primaryMatch = { ok: true, text: t, url: location.href };
-      if (strong.test(t) && !fallback) fallback = { ok: true, text: t, url: location.href };
+      const clean = cleanLabel(el);
+      if (!clean) continue;
+      if (excl.has(clean.toLowerCase())) continue;
+      const tag = (el.tagName || "").toLowerCase();
+      const outerHTML = (el.outerHTML || "").slice(0, 500);
+      const rec = { ok: true, text: clean, tag, source, outerHTML, url: location.href };
+      if (primary.test(clean) && !primaryMatch) primaryMatch = rec;
+      if (strong.test(clean) && !fallback) fallback = rec;
     }
-    return primaryMatch || fallback || { ok: false, text: null, url: location.href };
+    return primaryMatch || fallback || { ok: false, text: null, tag: null, source: null, outerHTML: null, url: location.href };
   }
 
   function clickLandingCta(text) {
     const target = String(text || "").trim().toLowerCase();
-    for (const el of queryAllDeep('button, [role="button"], a')) {
+    for (const { el, source } of collectClickableDeep()) {
       if (!visible(el)) continue;
       if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
-      const t = (el.innerText || el.getAttribute("aria-label") || "").trim();
-      if (!t) continue;
-      if (t.toLowerCase() === target) {
+      const clean = cleanLabel(el);
+      if (!clean) continue;
+      if (clean.toLowerCase() === target) {
         const urlBefore = location.href;
         el.click();
-        dbg({ step: "clickLandingCta", text: t });
-        return { ok: true, clickedText: t, urlBefore };
+        dbg({ step: "clickLandingCta", text: clean, source });
+        return { ok: true, clickedText: clean, source, urlBefore };
       }
     }
     return { ok: false, state: "CTA_NOT_FOUND", text };
