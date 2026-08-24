@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AffiliateOS Worker",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Browser automation worker for AffiliateOS.",
   "background": { "service_worker": "background.js" },
   "action": {
