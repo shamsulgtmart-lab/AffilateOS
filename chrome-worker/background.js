@@ -1,3 +1,4 @@
+/* global chrome */
 // ===========================================================================
 // AffiliateOS Worker — background service worker (Manifest V3)
 // Version 0.5.0 · Base44 Job Bridge
