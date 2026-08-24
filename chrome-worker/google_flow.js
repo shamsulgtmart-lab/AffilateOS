@@ -30,32 +30,101 @@ if (!window.__affiliateosFlowInjected) {
     catch { return false; }
   }
 
-  function snapshot() {
-    const inputs = Array.from(document.querySelectorAll(
-      'textarea, input[type="text"], input[type="search"], [contenteditable="true"], [role="textbox"]'
-    )).map((el, i) => ({
-      i, tag: el.tagName.toLowerCase(),
+  // --- Diagnostic collectors (diagnostics ONLY — never drive interaction) ---
+  // These traverse the main document, same-origin iframes, and accessible open
+  // shadow roots to build a complete picture of the page's inputs/buttons for
+  // the Admin diagnostic viewer. They do NOT affect findPromptInput /
+  // findGenerateButton / verification — those selectors are unchanged.
+  const DIAG_INPUT_SEL = 'textarea, input[type="text"], input[type="search"], [contenteditable="true"], [role="textbox"]';
+  const DIAG_BUTTON_SEL = 'button, [role="button"]';
+
+  function describeInput(el, i) {
+    return {
+      i,
+      tag: el.tagName.toLowerCase(),
+      id: el.id || "",
+      className: (typeof el.className === "string" ? el.className : "").slice(0, 200),
       placeholder: (el.getAttribute("placeholder") || "").trim(),
       ariaLabel: (el.getAttribute("aria-label") || "").trim(),
+      role: el.getAttribute("role") || "",
       text: ((el.innerText || el.value || "") + "").trim().slice(0, 120),
       visible: visible(el),
-    }));
-    const buttons = Array.from(document.querySelectorAll('button, [role="button"]'))
-      .map((el, i) => ({
-        i, text: ((el.innerText || el.getAttribute("aria-label") || "") + "").trim().slice(0, 80),
-        disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
-        visible: visible(el),
-      }))
-      .filter((b) => b.text && b.visible);
+      outerHTML: (el.outerHTML || "").slice(0, 500),
+    };
+  }
+
+  function describeButton(el, i) {
+    return {
+      i,
+      text: ((el.innerText || el.getAttribute("aria-label") || "") + "").trim().slice(0, 80),
+      ariaLabel: (el.getAttribute("aria-label") || "").trim(),
+      disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
+      visible: visible(el),
+      outerHTML: (el.outerHTML || "").slice(0, 500),
+    };
+  }
+
+  // Recursively collect inputs/buttons from a root (document, iframe doc, or
+  // open shadow root). Descends into open shadow roots and same-origin iframes.
+  function collectFromRoot(root, source, acc, depth) {
+    if (depth > 4) return;
+    try {
+      root.querySelectorAll(DIAG_INPUT_SEL).forEach((el) => {
+        acc.inputs.push(Object.assign({ source }, describeInput(el, acc.inputs.length)));
+      });
+    } catch {}
+    try {
+      root.querySelectorAll(DIAG_BUTTON_SEL).forEach((el) => {
+        const t = ((el.innerText || el.getAttribute("aria-label") || "") + "").trim();
+        if (!t || !visible(el)) return;
+        acc.buttons.push(Object.assign({ source }, describeButton(el, acc.buttons.length)));
+      });
+    } catch {}
+    // Descend into accessible open shadow roots.
+    try {
+      root.querySelectorAll("*").forEach((el) => {
+        if (el && el.shadowRoot) {
+          collectFromRoot(el.shadowRoot, source + ">shadow", acc, depth + 1);
+        }
+      });
+    } catch {}
+  }
+
+  // Collect same-origin iframes (cross-origin iframes only expose their src).
+  function collectIframes(doc, acc) {
+    const iframes = Array.from(doc.querySelectorAll("iframe"));
+    iframes.forEach((f, i) => {
+      const info = { i, src: f.src || "", visible: visible(f), sameOrigin: false, url: "" };
+      try {
+        const cdoc = f.contentDocument;
+        if (cdoc) {
+          info.sameOrigin = true;
+          info.url = cdoc.location.href;
+          collectFromRoot(cdoc, "iframe[" + i + "]", acc, 0);
+        }
+      } catch {}
+      acc.iframes.push(info);
+    });
+  }
+
+  function snapshot() {
+    const acc = { inputs: [], buttons: [], iframes: [] };
+    collectFromRoot(document, "main", acc, 0);
+    collectIframes(document, acc);
     const headings = Array.from(document.querySelectorAll("h1,h2,h3"))
       .map((h) => (h.innerText || "").trim().slice(0, 120)).filter(Boolean);
     const bodyText = document.body ? (document.body.innerText || "") : "";
     const needsLogin = /sign\s*in|log\s*in|use your google account|choose an account|sign in with google/i.test(bodyText);
     return {
       url: location.href, title: document.title, readyState: document.readyState,
-      needsLogin, videoCount: document.querySelectorAll("video").length,
-      headings: headings.slice(0, 20), inputs: inputs.slice(0, 25),
-      buttons: buttons.slice(0, 40), bodyExcerpt: bodyText.slice(0, 600),
+      needsLogin,
+      videoCount: document.querySelectorAll("video").length,
+      iframeCount: acc.iframes.length,
+      iframes: acc.iframes,
+      headings: headings.slice(0, 20),
+      inputs: acc.inputs.slice(0, 50),
+      buttons: acc.buttons.slice(0, 60),
+      bodyExcerpt: bodyText.slice(0, 600),
     };
   }
 
