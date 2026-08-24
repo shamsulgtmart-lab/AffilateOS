@@ -455,12 +455,22 @@ if (!window.__affiliateosFlowInjected) {
     const reject = /^(get started|learn more|explore tools|create your avatar|edit project|delete project|try omi now|try now|start now|create now|create a character)$/i;
     const primary = /^new project$/i;
     let match = null;
-    for (const { el, source } of collectClickableDeep()) {
+    const candidates = [];
+    const clickable = collectClickableDeep();
+    for (const { el, source } of clickable) {
       if (!visible(el)) continue;
       if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
       const raw = (el.innerText || el.getAttribute("aria-label") || "").trim();
       const clean = cleanLabel(el);
       if (!clean) continue;
+      candidates.push({
+        text: clean,
+        rawText: raw,
+        tag: (el.tagName || "").toLowerCase(),
+        source,
+        disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
+        outerHTML: (el.outerHTML || "").slice(0, 500),
+      });
       if (excl.has(clean.toLowerCase())) continue;
       if (reject.test(clean)) continue;
       if (primary.test(clean) && !match) {
@@ -472,10 +482,21 @@ if (!window.__affiliateosFlowInjected) {
           source,
           outerHTML: (el.outerHTML || "").slice(0, 500),
           url: location.href,
+          candidateCount: candidates.length,
         };
       }
     }
-    return match || { ok: false, text: null, rawText: null, tag: null, source: null, outerHTML: null, url: location.href };
+    return match || {
+      ok: false,
+      text: null,
+      rawText: null,
+      tag: null,
+      source: null,
+      outerHTML: null,
+      url: location.href,
+      candidateCount: candidates.length,
+      candidates: candidates.slice(-50),
+    };
   }
 
   function clickLandingCta(text) {
