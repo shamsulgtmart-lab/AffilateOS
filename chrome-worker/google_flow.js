@@ -405,30 +405,49 @@ if (!window.__affiliateosFlowInjected) {
   }
 
   // --- Landing-page → workspace entry (diagnostics + real UI clicks) --------
-  // Used when the Flow landing page has no visible prompt input. These helpers
-  // click the real visible CTA (e.g. "Get started") to enter the editor, then
-  // re-inspect. They do NOT touch findPromptInput / findGenerateButton /
-  // verification — those remain unchanged.
+  // Used when the Flow landing page has no visible prompt input. The real entry
+  // point is the visible "New project" button (per diagnostic evidence — not
+  // "Get started"). These helpers traverse open shadow roots to find it, click
+  // it, then re-inspect. They do NOT touch findPromptInput / findGenerateButton
+  // / verification — those remain unchanged. "Edit project" / "Delete project"
+  // are never matched.
+  function queryAllDeep(selector, root, acc) {
+    root = root || document;
+    acc = acc || [];
+    try {
+      root.querySelectorAll(selector).forEach((el) => acc.push(el));
+    } catch {}
+    try {
+      root.querySelectorAll("*").forEach((el) => {
+        if (el.shadowRoot) queryAllDeep(selector, el.shadowRoot, acc);
+      });
+    } catch {}
+    return acc;
+  }
+
   function findLandingCta(excludeTexts) {
     const excl = new Set((excludeTexts || []).map((t) => String(t).trim().toLowerCase()));
-    const strong = /^(get started|try omi now|create a character|start now|try now|create now|new project|start creating|begin|continue|open editor|launch)$/i;
-    const weak = /^(get started|try|create|start|begin|new|continue|open|launch|use)$/i;
+    // Primary: the observed "New project" button. Fallback: other common
+    // landing CTAs. Never match "Edit project" or "Delete project".
+    const primary = /^(new project)$/i;
+    const strong = /^(get started|try omi now|create a character|start now|try now|create now|start creating|begin|continue|open editor|launch)$/i;
+    let primaryMatch = null;
     let fallback = null;
-    for (const el of document.querySelectorAll('button, [role="button"], a')) {
+    for (const el of queryAllDeep('button, [role="button"], a')) {
       if (!visible(el)) continue;
       if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
       const t = (el.innerText || el.getAttribute("aria-label") || "").trim();
       if (!t) continue;
       if (excl.has(t.toLowerCase())) continue;
-      if (strong.test(t)) return { ok: true, text: t, url: location.href };
-      if (weak.test(t) && !fallback) fallback = { ok: true, text: t, url: location.href };
+      if (primary.test(t) && !primaryMatch) primaryMatch = { ok: true, text: t, url: location.href };
+      if (strong.test(t) && !fallback) fallback = { ok: true, text: t, url: location.href };
     }
-    return fallback || { ok: false, text: null, url: location.href };
+    return primaryMatch || fallback || { ok: false, text: null, url: location.href };
   }
 
   function clickLandingCta(text) {
     const target = String(text || "").trim().toLowerCase();
-    for (const el of document.querySelectorAll('button, [role="button"], a')) {
+    for (const el of queryAllDeep('button, [role="button"], a')) {
       if (!visible(el)) continue;
       if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
       const t = (el.innerText || el.getAttribute("aria-label") || "").trim();
