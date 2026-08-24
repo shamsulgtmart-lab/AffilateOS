@@ -404,6 +404,61 @@ if (!window.__affiliateosFlowInjected) {
     };
   }
 
+  // --- Landing-page → workspace entry (diagnostics + real UI clicks) --------
+  // Used when the Flow landing page has no visible prompt input. These helpers
+  // click the real visible CTA (e.g. "Get started") to enter the editor, then
+  // re-inspect. They do NOT touch findPromptInput / findGenerateButton /
+  // verification — those remain unchanged.
+  function findLandingCta(excludeTexts) {
+    const excl = new Set((excludeTexts || []).map((t) => String(t).trim().toLowerCase()));
+    const strong = /^(get started|try omi now|create a character|start now|try now|create now|new project|start creating|begin|continue|open editor|launch)$/i;
+    const weak = /^(get started|try|create|start|begin|new|continue|open|launch|use)$/i;
+    let fallback = null;
+    for (const el of document.querySelectorAll('button, [role="button"], a')) {
+      if (!visible(el)) continue;
+      if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
+      const t = (el.innerText || el.getAttribute("aria-label") || "").trim();
+      if (!t) continue;
+      if (excl.has(t.toLowerCase())) continue;
+      if (strong.test(t)) return { ok: true, text: t, url: location.href };
+      if (weak.test(t) && !fallback) fallback = { ok: true, text: t, url: location.href };
+    }
+    return fallback || { ok: false, text: null, url: location.href };
+  }
+
+  function clickLandingCta(text) {
+    const target = String(text || "").trim().toLowerCase();
+    for (const el of document.querySelectorAll('button, [role="button"], a')) {
+      if (!visible(el)) continue;
+      if (el.disabled === true || el.getAttribute("aria-disabled") === "true") continue;
+      const t = (el.innerText || el.getAttribute("aria-label") || "").trim();
+      if (!t) continue;
+      if (t.toLowerCase() === target) {
+        const urlBefore = location.href;
+        el.click();
+        dbg({ step: "clickLandingCta", text: t });
+        return { ok: true, clickedText: t, urlBefore };
+      }
+    }
+    return { ok: false, state: "CTA_NOT_FOUND", text };
+  }
+
+  function getPromptCandidates() {
+    const found = findPromptInput();
+    const sel = 'textarea, [contenteditable="true"], [role="textbox"], input[type="text"], input[type="search"]';
+    const candidates = [];
+    for (const el of document.querySelectorAll(sel)) {
+      candidates.push(describeInput(el, candidates.length));
+    }
+    return {
+      ok: true,
+      url: location.href,
+      hasVisiblePrompt: !!(found && visible(found)),
+      foundText: found ? (found.getAttribute("placeholder") || found.getAttribute("aria-label") || (found.innerText || "").slice(0, 80) || "") : null,
+      candidates: candidates.slice(0, 50),
+    };
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || msg.type !== "AFFILIATEOS_FLOW_RUN") return false;
     const action = msg.action;
@@ -414,7 +469,7 @@ if (!window.__affiliateosFlowInjected) {
           const title = document.title || "";
           const bodyText = document.body ? (document.body.innerText || "") : "";
           const is404 = /404|not found on this server|requested url .* was not found/i.test(title + " " + bodyText.slice(0, 400));
-          const needsLogin = /sign\s*in|log\s*in|use your google account|choose an account|sign in with google/i.test(bodyText);
+          const needsLogin = /sign\s*in|log\s*in|use your google account|choose an account|sign in with google/i.test(bodyText.slice(0, 400));
           return { ok: true, url, title, is404, needsLogin, bodyExcerpt: bodyText.slice(0, 300) };
         }
         if (action === "inspect") {
@@ -453,6 +508,15 @@ if (!window.__affiliateosFlowInjected) {
         }
         if (action === "getDebug") {
           return { ok: true, debug: window.__affiliateosDebug };
+        }
+        if (action === "getPromptCandidates") {
+          return getPromptCandidates();
+        }
+        if (action === "findLandingCta") {
+          return findLandingCta(msg.excludeTexts || []);
+        }
+        if (action === "clickLandingCta") {
+          return clickLandingCta(msg.text || "");
         }
         return { ok: false, state: "UNKNOWN_ACTION" };
       } catch (e) {
